@@ -1,0 +1,117 @@
+---
+title: "SVM images"
+date: "July 17, 2016"
+output: html_document
+---
+
+Take sorted images, flatten images into a matrix, run SVM, see if you can see seals
+
+###Call in libraries
+```{r}
+require("EBImage")
+require("e1071")
+require("ROCR")
+
+```
+
+```{r}
+###Set Directories
+  base <- "/Users/sigmamonstr/Github/noaa_seals/tutorial"
+  target_folder <- "target_folder"
+  class1 <- "none"
+  class2 <- "seal"
+  image_dir <- paste(base,target_folder,sep="/")
+
+#Parameters
+  resize_edge = 100 
+  
+```
+
+###Load in photos
+```{r}
+##Load in images, flatten into standard dataset
+  master <- data.frame()
+  for(classes in c(class1,class2)){
+      
+    #Set working directory
+  	  setwd(paste(image_dir,classes,sep="/"))
+  		img_set = list.files(pattern="*.jpg")
+  	
+  	#Read in image
+  		#Set temporary matrix size
+      dataset = data.frame( matrix(NA, nrow = length(img_set), ncol = 2+ resize_edge^2 ))
+      colnames(dataset)[1:2] <- c("file","target")
+      
+      for(k in 1:length(img_set)){
+        
+        #Counter
+          print(paste(classes,": ",round(100*k/length(img_set),1),"%",sep=""))
+        
+        #Read in image
+        img <- readImage(img_set[k])
+        
+        #Resize
+        r = resize(img, w = resize_edge, h = resize_edge)
+        
+        #Equal channels
+        img = (r@.Data[,,1]+r@.Data[,,2]+r@.Data[,,3])/3
+        
+        #Image to vector
+        dataset[k,1] <- img_set[k]
+        dataset[k,2] <- classes
+        dataset[k,3:ncol(dataset)] <- matrix(img,nrow=1,ncol= resize_edge^2)
+   
+      }
+      #Dump loop results into master
+      master <- rbind(master,dataset)
+  }
+  
+  ##Save out R object
+  save(master, file=paste(image_dir,"/master.Rda",sep=""))
+```
+
+###Train and partition data
+```{r}
+  
+##Drop file field
+  master$file <- NULL
+  master$target <- as.factor(master$target)
+  
+## Partition into 70/30
+  ssize <- floor(0.7*nrow(master))
+  set.seed(123)
+  index <- sample(seq_len(nrow(master)), size = ssize)
+
+#Train
+  train <- master[index, ]
+  test <- master[-index, ]
+
+```
+
+####
+###Run SVM
+
+```{r}
+
+  svm <- svm(target ~ .,data=train,probability=TRUE, gamma = 0.5, cost=4)
+  summary(svm)
+  pred <- predict(svm, newdata = test[,2:ncol(test)], probability = TRUE)
+  scores <- data.frame(y = as.numeric(test$target=="seal"), prob = attributes(pred)$probabilities[,2])
+  
+  roc_graph <- function(scores,prob,target){
+    require(ROCR)
+    pred <- prediction(scores$prob,scores$y)
+    perf <- performance(pred,"tpr","fpr")
+    auc <- performance(pred,"auc")
+    
+    # plotting the ROC curve
+    auc <- performance(pred,"auc")
+    auc <- unlist(slot(auc, "y.values"))
+    
+    #graph
+    plot(perf,col="red",lty=3, lwd=3)
+    legend(0.7,0.3,paste("AUC = ",round(auc,3)),border="white",cex=0.9,box.col = "white")
+  }
+roc_graph(scores,prob,target)
+
+```
